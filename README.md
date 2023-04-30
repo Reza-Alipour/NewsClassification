@@ -1,4 +1,4 @@
-# A Multilingual Transformer Language Model-based Approach for the Detection ofNews Genre, Framing and Persuasion Techniques
+# A Multilingual Transformer Language Model-based Approach for the Detection of News Genre, Framing and Persuasion Techniques
 
 This project is a submission for SemEval contest that involves three sub-tasks: news genre classification, news framing
 and persuasion technique identification. We aim to build a model that can accurately perform these tasks.
