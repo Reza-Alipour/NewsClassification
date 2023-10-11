@@ -48,7 +48,7 @@ def prepare_data(x, dataset_config):
         label = [0] * dataset_config['class_nums']
         for l in x['label']:
             label[dataset_config['label_to_id'][l]] = 1
-        return {'text': x['text'], 'label': label.float()}
+        return {'text': x['text'], 'label': label}
     else:
         raise ValueError(f'Unknown dataset type: {dataset_config["type"]}')
 
@@ -76,7 +76,7 @@ def tokenize(x, tokenizer1, tokenizer2=None):
         input_ids_t2 = t2_output['input_ids']
         attention_mask_t2 = t2_output['attention_mask']
 
-    labels = x['label']
+    labels = x['label'].float()
     if labels.__class__ == list:
         labels = torch.cat([t.unsqueeze(0) for t in labels], dim=0).transpose(0, 1)
     tokenized_inputs = {
