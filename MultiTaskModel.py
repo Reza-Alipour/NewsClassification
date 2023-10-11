@@ -57,9 +57,9 @@ class MultiTaskClassifier(PreTrainedModel, ABC):
                     config.final_layer_size
                 )
 
-        self.heads = []
+        self.heads = {}
         for i in range(len(config.classes)):
-            self.heads.append(self._create_output_head(len(config.classes[i])))
+            self.heads[i] = self._create_output_head(len(config.classes[i]))
 
         if self.use_second_transformer:
             if self.use_auto_encoder:
@@ -116,7 +116,7 @@ class MultiTaskClassifier(PreTrainedModel, ABC):
                 outputs['t2_pooler'] = y
                 outputs['d2_output'] = d2
 
-        for i, head in enumerate(self.heads):
+        for i, head in self.heads.items():
             outputs[f'logits_{i}'] = head(classifier_input)
         return outputs
 

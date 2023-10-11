@@ -157,8 +157,6 @@ def main():
         else:
             raise NotImplementedError(f'{ds["loss"]} loss function is not supported yet.')
     model.to(device)
-    for head in model.heads:
-        head.to(device)
 
     iterators = [iter(dl) for dl in dataloaders]
     optimizer = AdamW(model.parameters(), lr=train_args.lr)
