@@ -76,7 +76,7 @@ def tokenize(x, tokenizer1, tokenizer2=None):
         input_ids_t2 = t2_output['input_ids']
         attention_mask_t2 = t2_output['attention_mask']
 
-    labels = x['label'].float()
+    labels = x['label']
     if labels.__class__ == list:
         labels = torch.cat([t.unsqueeze(0) for t in labels], dim=0).transpose(0, 1)
     tokenized_inputs = {
@@ -184,6 +184,8 @@ def main():
                     outputs = model(**input_batch)
                     logits = outputs[f'logits_{f_ind}']
                     loss_fct = loss_functions[f_ind]
+                    if loss_fct.__class__ is torch.nn.modules.loss.BCEWithLogitsLoss:
+                        labels = labels.float()
                     loss = loss_fct(logits, labels)
                     loss.backward()
                     optimizer.step()
