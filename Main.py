@@ -224,10 +224,6 @@ def main():
                 break
 
     if config_args.push_to_hub:
-        model_config.push_to_hub(
-            repo_id=config_args.repo_id,
-            token=config_args.hf_write_token
-        )
         model.push_to_hub(
             repo_id=config_args.repo_id,
             token=config_args.hf_write_token
