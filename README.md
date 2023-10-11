@@ -64,8 +64,8 @@ python Main.py --lr \
   --push_to_hub (default = False) \
   --repo_id repo_id_to_push (default = None) \
   --hf_write_token token_to_write_on_huggingface (default = None) \
-  --do_train (default = True) \
-  --do_eval (default = True)
+  --do_train (default = False) \
+  --do_eval (default = False)
 ```
 
 ### Using the Model for Custom Tasks
