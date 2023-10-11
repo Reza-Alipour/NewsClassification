@@ -222,8 +222,8 @@ def main():
                         metric.add_batch(references=labels, predictions=predicted_classes)
 
                 print(f'Epoch: {e}, Dataset: {dataset_config[i]["name"]}, Accuracy: {metric.compute()["accuracy"]}.')
-                if config_args.do_train is False:
-                    break
+            if config_args.do_train is False:
+                break
 
     if config_args.push_to_hub:
         model_config.push_to_hub(
