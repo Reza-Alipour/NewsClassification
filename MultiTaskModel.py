@@ -11,14 +11,14 @@ class MultiTaskClassifierConfig(PretrainedConfig):
 
     def __init__(
             self,
-            task_nums: int,
-            transformer_checkpoint: str,
-            transformer_hidden_state_size: int,
-            classes: List[List[str]],
+            task_nums: int = None,
+            transformer_checkpoint: str = None,
+            transformer_hidden_state_size: int = None,
             final_layer_size: int = 32,
             second_transformer_checkpoint: str = None,
             second_transformer_hidden_state_size: int = None,
             use_auto_encoder: bool = False,
+            classes: List[List[str]] = None,
             **kwargs
     ):
         super().__init__(**kwargs)
