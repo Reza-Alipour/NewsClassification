@@ -21,10 +21,14 @@ class CustomizedTrainArguments:
 
 @dataclass
 class ConfigArguments:
-    task_config: str = field(default='configs/task-config.yaml')
     dataset_config: str = field(default='configs/datasets-config.yaml')
     hf_read_token: str = field(default=None)
     model_checkpoint: str = field(default=None)
+    push_to_hub: bool = field(default=False)
+    repo_id: str = field(default=None)
+    hf_write_token: str = field(default=None)
+    do_train: bool = field(default=True)
+    do_eval: bool = field(default=True)
 
 
 @dataclass
@@ -32,6 +36,7 @@ class ModelArguments:
     transformer1: str = field(default='xlm-roberta-base')
     t1_last_layer_size: int = field(default=768)
     transformer2: str = field(default=None)
+    t2_last_layer_size: int = field(default=None)
     use_autoencoder: bool = field(default=False)
     final_shared_layer_size: int = field(default=32)
 
@@ -104,7 +109,7 @@ def main():
             transformer_checkpoint=model_args.transformer1,
             transformer_hidden_state_size=model_args.t1_last_layer_size,
             second_transformer_checkpoint=model_args.transformer2,
-            second_transformer_hidden_state_size=model_args.t1_last_layer_size,
+            second_transformer_hidden_state_size=model_args.t2_last_layer_size,
             use_auto_encoder=model_args.use_autoencoder,
             final_layer_size=model_args.final_shared_layer_size,
             classes=[list(ds['label_to_id'].keys()) for ds in dataset_config]
@@ -160,7 +165,7 @@ def main():
     for e in range(train_args.epochs):
         epoch_completed = [False] * len(dataset_config)
         model.train()
-        while not all(epoch_completed):
+        while config_args.do_train and not all(epoch_completed):
             for f_ind, f in enumerate(freqs):
                 for _ in range(f):
                     try:
@@ -183,7 +188,7 @@ def main():
                     lr_scheduler.step()
                     optimizer.zero_grad()
 
-        if e % 5 == 0:
+        if config_args.do_eval and e % 5 == 0:
             model.eval()
             for i in range(len(valid_datasets)):
                 eval_dataloader = validation_dataloaders[i]
@@ -206,6 +211,18 @@ def main():
                         metric.add_batch(references=labels, predictions=predicted_classes)
 
                 print(f'Epoch: {e}, Dataset: {dataset_config[i]["name"]}, Accuracy: {metric.compute()["accuracy"]}.')
+                if config_args.do_train is False:
+                    break
+
+    if config_args.push_to_hub:
+        model_config.push_to_hub(
+            repo_id=config_args.repo_id,
+            token=config_args.hf_write_token
+        )
+        model.push_to_hub(
+            repo_id=config_args.repo_id,
+            token=config_args.hf_write_token
+        )
 
 
 if __name__ == '__main__':
