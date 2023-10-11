@@ -45,10 +45,10 @@ def prepare_data(x, dataset_config):
     if dataset_config['loss'] == 'CE':
         return {'text': x['text'], 'label': dataset_config['label_to_id'][x['label']]}
     elif dataset_config['loss'] == 'BCE':
-        label = [0.0] * dataset_config['class_nums']
+        label = [0] * dataset_config['class_nums']
         for l in x['label']:
-            label[dataset_config['label_to_id'][l]] = 1.0
-        return {'text': x['text'], 'label': label}
+            label[dataset_config['label_to_id'][l]] = 1
+        return {'text': x['text'], 'label': label.float()}
     else:
         raise ValueError(f'Unknown dataset type: {dataset_config["type"]}')
 
@@ -150,6 +150,8 @@ def main():
         else:
             raise NotImplementedError(f'{ds["loss"]} loss function is not supported yet.')
     model.to(device)
+    for head in model.heads:
+        head.to(device)
 
     iterators = [iter(dl) for dl in dataloaders]
     optimizer = AdamW(model.parameters(), lr=train_args.lr)
