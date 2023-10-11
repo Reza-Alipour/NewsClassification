@@ -27,8 +27,8 @@ class ConfigArguments:
     push_to_hub: bool = field(default=False)
     repo_id: str = field(default=None)
     hf_write_token: str = field(default=None)
-    do_train: bool = field(default=True)
-    do_eval: bool = field(default=True)
+    do_train: bool = field(default=False)
+    do_eval: bool = field(default=False)
 
 
 @dataclass
@@ -101,8 +101,15 @@ def main():
     tokenizer1 = AutoTokenizer.from_pretrained(model_args.transformer1)
     tokenizer2 = None if model_args.transformer2 is None else AutoTokenizer.from_pretrained(model_args.transformer2)
     if config_args.model_checkpoint:
-        model_config = MultiTaskClassifierConfig.from_pretrained(config_args.model_checkpoint)
-        model = MultiTaskClassifier.from_pretrained(config_args.model_checkpoint, config=model_config)
+        model_config = MultiTaskClassifierConfig.from_pretrained(
+            config_args.model_checkpoint,
+            token=config_args.hf_read_token
+        )
+        model = MultiTaskClassifier.from_pretrained(
+            config_args.model_checkpoint,
+            config=model_config,
+            token=config_args.hf_read_token
+        )
     else:
         model_config = MultiTaskClassifierConfig(
             task_nums=len(dataset_config),
