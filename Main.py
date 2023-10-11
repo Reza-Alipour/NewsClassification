@@ -1,89 +1,212 @@
+from dataclasses import dataclass, field
+
+import evaluate
 import torch
-from datasets import DatasetDict, Dataset
-from transformers import AutoTokenizer, AutoModel, AutoConfig, TrainingArguments, \
-    get_linear_schedule_with_warmup
+import yaml
+from datasets import load_dataset
+from torch.nn import CrossEntropyLoss, BCEWithLogitsLoss
+from torch.optim import AdamW
+from torch.utils.data import DataLoader
+from transformers import HfArgumentParser, get_scheduler, AutoTokenizer
 
-from HelperClasses import CustomTrainer, LogCallback
-from HelperFunctions import convert_to_features, compute_metrics_f1_multi, compute_metrics
-from Models import MultiHeadClassifier, MultiHeadModel
-from Parameters import xlm_checkpoint, labse_checkpoint, t2_weights, total_epochs, batch_size, each_task_epochs, \
-    t3_weights, t1_weights
+from MultiTaskModel import MultiTaskClassifierConfig, MultiTaskClassifier
 
-xlm_tokenizer = AutoTokenizer.from_pretrained(xlm_checkpoint)
-labse_tokenizer = AutoTokenizer.from_pretrained(labse_checkpoint)
 
-AutoConfig.register("MultiHeadClassifier", MultiHeadClassifier)
-AutoModel.register(MultiHeadClassifier, MultiHeadModel)
+@dataclass
+class CustomizedTrainArguments:
+    lr: float = field(default=1e-5)
+    epochs: int = field(default=3)
+    batch_size: int = field(default=4)
 
-loaded_csvs = {
-    (1, 'train1'): Dataset.from_csv(f'dataset/t1/train.csv'),
-    (2, 'train2'): Dataset.from_csv(f'dataset/t2/train.csv'),
-    (3, 'train3'): Dataset.from_csv(f'dataset/t3/train.csv'),
-    (1, 'validation1'): Dataset.from_csv(f'dataset/t1/validation.csv'),
-    (2, 'validation2'): Dataset.from_csv(f'dataset/t2/validation.csv'),
-    (3, 'validation3'): Dataset.from_csv(f'dataset/t3/validation.csv'),
-}
-dataset = {}
-for (i, j), k in loaded_csvs.items():
-    tokenized = k.map(
-        lambda x: convert_to_features(x, i, xlm_tokenizer, labse_tokenizer),
-        batched=True,
-        batch_size=16
-    )
-    dataset[j] = tokenized
-tokenized_dataset = DatasetDict(dataset)
 
-model = MultiHeadModel(config=AutoConfig.from_pretrained('results'))
-# model = MultiHeadModel.from_pretrained('model_results')
+@dataclass
+class ConfigArguments:
+    task_config: str = field(default='configs/task-config.yaml')
+    dataset_config: str = field(default='configs/datasets-config.yaml')
+    hf_read_token: str = field(default=None)
+    model_checkpoint: str = field(default=None)
 
-train_task = 1
-for i in range(total_epochs):
-    args = TrainingArguments(
-        "results",
-        evaluation_strategy="epoch",
-        learning_rate=1e-5,
-        per_device_train_batch_size=batch_size,
-        num_train_epochs=each_task_epochs,
-        weight_decay=0.01,
-        save_strategy='epoch',
-        save_total_limit=4,
-        logging_strategy='epoch',
-        load_best_model_at_end=True,
-        metric_for_best_model='macro',
-        gradient_accumulation_steps=16,
-        do_train=True,
-        do_eval=True,
-        report_to='none',
-        per_device_eval_batch_size=batch_size,
-        logging_steps=1,
-    )
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-5, eps=1e-8)
-    total_steps = int((len(loaded_csvs['train']) // batch_size) * each_task_epochs)
-    lr_scheduler = get_linear_schedule_with_warmup(optimizer, num_warmup_steps=0, num_training_steps=total_steps)
-    metric = None
-    if train_task == 1:
-        metric = lambda x: compute_metrics(x, train_task)
+@dataclass
+class ModelArguments:
+    transformer1: str = field(default='xlm-roberta-base')
+    t1_last_layer_size: int = field(default=768)
+    transformer2: str = field(default=None)
+    use_autoencoder: bool = field(default=False)
+    final_shared_layer_size: int = field(default=32)
+
+
+def prepare_data(x, dataset_config):
+    if dataset_config['loss'] == 'CE':
+        return {'text': x['text'], 'label': dataset_config['label_to_id'][x['label']]}
+    elif dataset_config['loss'] == 'BCE':
+        label = [0.0] * dataset_config['class_nums']
+        for l in x['label']:
+            label[dataset_config['label_to_id'][l]] = 1.0
+        return {'text': x['text'], 'label': label}
     else:
-        metric = lambda x: compute_metrics_f1_multi(x, train_task)
-    loss = 'ce' if train_task == 1 else 'bce'
-    num_labels = 3 if train_task == 1 else (14 if train_task == 2 else 23)
-    loss_weights = t1_weights if train_task == 1 else (t2_weights if train_task == 2 else t3_weights)
-    trainer = CustomTrainer(
-        model,
-        args,
-        optimizers=(optimizer, lr_scheduler),
-        train_dataset=tokenized_dataset[f'train{train_task}'],
-        eval_dataset=tokenized_dataset[f'validation{train_task}'],
-        compute_metrics=metric,
-        callbacks=[LogCallback],
-        task=train_task,
-        num_labels=num_labels,
-        loss=loss,
-        weights=loss_weights,
+        raise ValueError(f'Unknown dataset type: {dataset_config["type"]}')
+
+
+def tokenize(x, tokenizer1, tokenizer2=None):
+    input_ids_t2 = None
+    attention_mask_t2 = None
+
+    t1_output = tokenizer1(
+        x['text'],
+        padding=True,
+        truncation=True,
+        return_tensors='pt'
     )
-    trainer.train()
+    input_ids_t1 = t1_output['input_ids']
+    attention_mask_t1 = t1_output['attention_mask']
+    if tokenizer2 is not None:
+        t2_output = tokenizer2(
+            x['text'],
+            padding=False,
+            max_length=512,
+            truncation=True,
+            return_tensors='pt'
+        )
+        input_ids_t2 = t2_output['input_ids']
+        attention_mask_t2 = t2_output['attention_mask']
 
-    train_task += 1
+    labels = x['label']
+    if labels.__class__ == list:
+        labels = torch.cat([t.unsqueeze(0) for t in labels], dim=0).transpose(0, 1)
+    tokenized_inputs = {
+        'input_ids_t1': input_ids_t1,
+        'attention_mask_t1': attention_mask_t1,
+    }
+    if tokenizer2 is not None:
+        tokenized_inputs.update({
+            'input_ids_t2': input_ids_t2,
+            'attention_mask_t2': attention_mask_t2
+        })
+    return tokenized_inputs, labels
 
-model.save_pretrained("model_results")
+
+def main():
+    parser = HfArgumentParser((ConfigArguments, ModelArguments, CustomizedTrainArguments))
+    config_args, model_args, train_args = parser.parse_args_into_dataclasses()
+    dataset_config = yaml.load(open(config_args.dataset_config, 'r'), Loader=yaml.FullLoader)
+    datasets = [load_dataset(ds['name'], token=config_args.hf_read_token) for ds in dataset_config]
+    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+
+    tokenizer1 = AutoTokenizer.from_pretrained(model_args.transformer1)
+    tokenizer2 = None if model_args.transformer2 is None else AutoTokenizer.from_pretrained(model_args.transformer2)
+    if config_args.model_checkpoint:
+        model_config = MultiTaskClassifierConfig.from_pretrained(config_args.model_checkpoint)
+        model = MultiTaskClassifier.from_pretrained(config_args.model_checkpoint, config=model_config)
+    else:
+        model_config = MultiTaskClassifierConfig(
+            task_nums=len(dataset_config),
+            transformer_checkpoint=model_args.transformer1,
+            transformer_hidden_state_size=model_args.t1_last_layer_size,
+            second_transformer_checkpoint=model_args.transformer2,
+            second_transformer_hidden_state_size=model_args.t1_last_layer_size,
+            use_auto_encoder=model_args.use_autoencoder,
+            final_layer_size=model_args.final_shared_layer_size,
+            classes=[list(ds['label_to_id'].keys()) for ds in dataset_config]
+        )
+        model = MultiTaskClassifier(config=model_config)
+
+    new_datasets = []
+    valid_datasets = []
+    for ds, ds_config in zip(datasets, dataset_config):
+        train_ds = ds['train']
+        valid_ds = ds['validation']
+        if 'labels' in list(train_ds.features.keys()):
+            train_ds = train_ds.rename_column('labels', 'label')
+            valid_ds = valid_ds.rename_column('labels', 'label')
+        column_to_remove = list(train_ds.features.keys())
+        column_to_remove.remove('text')
+        column_to_remove.remove('label')
+        new_datasets.append(train_ds.map(lambda x: prepare_data(x, ds_config), remove_columns=column_to_remove))
+        valid_datasets.append(valid_ds.map(lambda x: prepare_data(x, ds_config), remove_columns=column_to_remove))
+    datasets = new_datasets
+
+    dataloaders = [DataLoader(ds, batch_size=train_args.batch_size, shuffle=True) for ds in datasets]
+    validation_dataloaders = [DataLoader(ds, batch_size=train_args.batch_size, shuffle=False) for ds in valid_datasets]
+    freqs = [ds['freqs'] for ds in dataset_config]
+    loss_weights = []
+    for ds in dataset_config:
+        weight = ds['loss_weights']
+        if weight:
+            weight = torch.tensor(weight).to(device)
+        loss_weights.append(weight)
+
+    loss_functions = []
+    for i, ds in enumerate(dataset_config):
+        if ds['loss'] == 'CE':
+            loss_functions.append(CrossEntropyLoss(weight=loss_weights[i]))
+        elif ds['loss'] == 'BCE':
+            loss_functions.append(BCEWithLogitsLoss(weight=loss_weights[i]))
+        else:
+            raise NotImplementedError(f'{ds["loss"]} loss function is not supported yet.')
+    model.to(device)
+
+    iterators = [iter(dl) for dl in dataloaders]
+    optimizer = AdamW(model.parameters(), lr=train_args.lr)
+    num_training_steps = train_args.epochs * sum([len(dl) for dl in dataloaders])
+    lr_scheduler = get_scheduler(
+        name="linear",
+        optimizer=optimizer,
+        num_warmup_steps=0,
+        num_training_steps=num_training_steps
+    )
+
+    metric = evaluate.load("accuracy")
+    for e in range(train_args.epochs):
+        epoch_completed = [False] * len(dataset_config)
+        model.train()
+        while not all(epoch_completed):
+            for f_ind, f in enumerate(freqs):
+                for _ in range(f):
+                    try:
+                        batch = next(iterators[f_ind])
+                    except StopIteration:
+                        epoch_completed[f_ind] = True
+                        iterators[f_ind] = iter(dataloaders[f_ind])
+                        continue
+
+                    input_batch, labels = tokenize(batch, tokenizer1, tokenizer2)
+                    input_batch = {k: v.to(device) for k, v in input_batch.items()}
+                    labels = labels.to(device)
+
+                    outputs = model(**input_batch)
+                    logits = outputs[f'logits_{f_ind}']
+                    loss_fct = loss_functions[f_ind]
+                    loss = loss_fct(logits, labels)
+                    loss.backward()
+                    optimizer.step()
+                    lr_scheduler.step()
+                    optimizer.zero_grad()
+
+        if e % 5 == 0:
+            model.eval()
+            for i in range(len(valid_datasets)):
+                eval_dataloader = validation_dataloaders[i]
+                for batch in eval_dataloader:
+                    input_batch, labels = tokenize(batch, tokenizer1, tokenizer2)
+                    input_batch = {k: v.to(device) for k, v in input_batch.items()}
+                    labels = labels.to(device)
+                    with torch.no_grad():
+                        outputs = model(**input_batch)
+                    logits = outputs[f'logits_{i}']
+                    loss_type = dataset_config[i]['loss']
+                    if loss_type == 'CE':
+                        predicted_classes = torch.argmax(logits, dim=1)
+                        metric.add_batch(references=labels, predictions=predicted_classes)
+                    elif loss_type == 'BCE':
+                        threshold = 0.0  # Todo: Use validation set to find the best threshold
+                        predicted_classes = (logits > threshold).long()
+                        predicted_classes = predicted_classes.view(-1)
+                        labels = labels.reshape(-1).long()
+                        metric.add_batch(references=labels, predictions=predicted_classes)
+
+                print(f'Epoch: {e}, Dataset: {dataset_config[i]["name"]}, Accuracy: {metric.compute()["accuracy"]}.')
+
+
+if __name__ == '__main__':
+    main()
