@@ -68,11 +68,14 @@ python Main.py --lr \
   --do_eval (default = False)
 ```
 
+The trained model is available at [Hugging Face Repo](https://huggingface.co/reza-alipour/SemEvalNewsClassification).
+
+
 ### Using the Model for Custom Tasks
 
 Easily adapt this model for your specific NLP tasks by customizing the dataset configuration in
 the `configs/datasets_config.yaml` file. Train the model with your data, and you're ready to make predictions tailored
-to your needs.
+to your needs. Note that to adapt number of tasks you should change the classifier heads in the model too.
 
 
 
