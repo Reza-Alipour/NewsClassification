@@ -98,7 +98,7 @@ def main():
     config_args, model_args, train_args = parser.parse_args_into_dataclasses()
     dataset_config = yaml.load(open(config_args.dataset_config, 'r'), Loader=yaml.FullLoader)
     datasets = [load_dataset(ds['name'], token=config_args.hf_read_token) for ds in dataset_config]
-    datasets = [ds.filter(lambda x: x['text'] is not None and 2 > len(x['text'].split()) > 0) for ds in datasets]
+    datasets = [ds.filter(lambda x: x['text'] is not None and 11 > len(x['text'].split()) > 3) for ds in datasets]
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
     tokenizer1 = AutoTokenizer.from_pretrained(model_args.transformer1)
