@@ -200,7 +200,7 @@ def main():
                     lr_scheduler.step()
                     optimizer.zero_grad()
 
-        if config_args.do_eval and e % 5 == 0:
+        if config_args.do_eval and e % 4 == 0:
             model.eval()
             for i in range(len(valid_datasets)):
                 eval_dataloader = validation_dataloaders[i]
