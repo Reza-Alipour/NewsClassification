@@ -40,6 +40,9 @@ class MultiTaskClassifier(PreTrainedModel, ABC):
         super().__init__(config, *inputs, **kwargs)
         self.config = config
         self.t1 = AutoModel.from_pretrained(config.transformer_checkpoint, add_pooling_layer=True)
+        for n,p in self.t1.named_parameters():
+            if n.startswith('pooler'):
+                p.requires_grad = False
         self.use_auto_encoder = config.use_auto_encoder
         self.use_second_transformer = config.second_transformer_checkpoint is not None
 
@@ -59,7 +62,6 @@ class MultiTaskClassifier(PreTrainedModel, ABC):
 
         self.head1 = self._create_output_head(len(config.classes[0]))
         self.head2 = self._create_output_head(len(config.classes[1]))
-        self.head3 = self._create_output_head(len(config.classes[2]))
 
         if self.use_second_transformer:
             if self.use_auto_encoder:
@@ -74,9 +76,7 @@ class MultiTaskClassifier(PreTrainedModel, ABC):
 
         self.hidden_state_to_head = nn.Sequential(
             nn.Linear(classifiers_first_layer_input_size, 128),
-            nn.ReLU(),
-            nn.Linear(128, 64),
-            nn.ReLU()
+            nn.Tanh()
         )
 
     def forward(
@@ -141,7 +141,7 @@ class MultiTaskClassifier(PreTrainedModel, ABC):
     def _create_output_head(num_label: int):
         if num_label == 2:
             num_label = 1
-        return nn.Linear(64, num_label)
+        return nn.Linear(128, num_label)
 
     def get_heads(self):
-        return [self.head1, self.head2, self.head3]
+        return [self.head1, self.head2]

@@ -44,6 +44,8 @@ class ModelArguments:
 def prepare_data(x, dataset_config):
     if dataset_config['loss'] == 'CE':
         return {'text': x['text'], 'label': dataset_config['label_to_id'][x['label']]}
+    elif dataset_config['loss'] == 'BCE' and dataset_config['class_nums'] == 2:
+        return {'text': x['text'], 'label': [x['label']]}
     elif dataset_config['loss'] == 'BCE':
         label = [0] * dataset_config['class_nums']
         for l in x['label']:
@@ -96,6 +98,7 @@ def main():
     config_args, model_args, train_args = parser.parse_args_into_dataclasses()
     dataset_config = yaml.load(open(config_args.dataset_config, 'r'), Loader=yaml.FullLoader)
     datasets = [load_dataset(ds['name'], token=config_args.hf_read_token) for ds in dataset_config]
+    datasets = [ds.filter(lambda x: x['text'] is not None and 2 > len(x['text'].split()) > 0) for ds in datasets]
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
     tokenizer1 = AutoTokenizer.from_pretrained(model_args.transformer1)
@@ -131,6 +134,12 @@ def main():
         if 'labels' in list(train_ds.features.keys()):
             train_ds = train_ds.rename_column('labels', 'label')
             valid_ds = valid_ds.rename_column('labels', 'label')
+        if 'DoesUseSarcasm' in list(train_ds.features.keys()):
+            train_ds = train_ds.rename_column('DoesUseSarcasm', 'label')
+            valid_ds = valid_ds.rename_column('DoesUseSarcasm', 'label')
+        if 'IsPositive' in list(train_ds.features.keys()):
+            train_ds = train_ds.rename_column('IsPositive', 'label')
+            valid_ds = valid_ds.rename_column('IsPositive', 'label')
         column_to_remove = list(train_ds.features.keys())
         column_to_remove.remove('text')
         column_to_remove.remove('label')
@@ -141,19 +150,13 @@ def main():
     dataloaders = [DataLoader(ds, batch_size=train_args.batch_size, shuffle=True) for ds in datasets]
     validation_dataloaders = [DataLoader(ds, batch_size=train_args.batch_size, shuffle=False) for ds in valid_datasets]
     freqs = [ds['freqs'] for ds in dataset_config]
-    loss_weights = []
-    for ds in dataset_config:
-        weight = ds['loss_weights']
-        if weight:
-            weight = torch.tensor(weight).to(device)
-        loss_weights.append(weight)
 
     loss_functions = []
     for i, ds in enumerate(dataset_config):
         if ds['loss'] == 'CE':
-            loss_functions.append(CrossEntropyLoss(weight=loss_weights[i]))
+            loss_functions.append(CrossEntropyLoss())
         elif ds['loss'] == 'BCE':
-            loss_functions.append(BCEWithLogitsLoss(weight=loss_weights[i]))
+            loss_functions.append(BCEWithLogitsLoss())
         else:
             raise NotImplementedError(f'{ds["loss"]} loss function is not supported yet.')
     model.to(device)
